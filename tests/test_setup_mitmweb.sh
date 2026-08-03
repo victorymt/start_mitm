@@ -392,7 +392,7 @@ test_setup_transaction_rolls_back() {
     }
     # shellcheck disable=SC2329
     curl() {
-        return 0
+        printf '200'
     }
 
     reset_configuration
@@ -432,6 +432,89 @@ test_setup_transaction_rolls_back() {
         fail "previously active service was not restarted"
     [[ -f "${mock_dir}/service-state/enabled-${SERVICE_NAME}" ]] ||
         fail "previous autostart state was not restored"
+}
+
+test_ready_accepts_authenticated_web_ui() {
+    local response_code
+
+    reset_configuration
+    READY_TIMEOUT="1"
+    # shellcheck disable=SC2329
+    systemctl() {
+        case "${2:-}" in
+            is-failed) return 1 ;;
+            is-active) return 0 ;;
+            *) return 0 ;;
+        esac
+    }
+    # shellcheck disable=SC2329
+    curl() {
+        printf '%s' "${response_code}"
+    }
+
+    for response_code in 200 403; do
+        wait_until_ready >/dev/null
+    done
+}
+
+test_ready_stops_on_failed_service() {
+    local curl_marker="${TEST_ROOT}/failed-service-curl"
+
+    reset_configuration
+    READY_TIMEOUT="300"
+    # shellcheck disable=SC2329
+    systemctl() {
+        case "${2:-}" in
+            is-failed) return 0 ;;
+            *) return 0 ;;
+        esac
+    }
+    # shellcheck disable=SC2329
+    curl() {
+        : >"${curl_marker}"
+        printf '200'
+    }
+    # shellcheck disable=SC2329
+    journalctl() {
+        return 0
+    }
+
+    if (wait_until_ready) >/dev/null 2>&1; then
+        fail "a failed service must not become ready"
+    fi
+    [[ ! -e "${curl_marker}" ]] || fail "readiness probe ran after the service failed"
+}
+
+test_ready_timeout_uses_wall_clock() {
+    local elapsed
+    local started
+
+    reset_configuration
+    # shellcheck disable=SC2034
+    READY_TIMEOUT="1"
+    # shellcheck disable=SC2329
+    systemctl() {
+        case "${2:-}" in
+            is-failed) return 1 ;;
+            *) return 0 ;;
+        esac
+    }
+    # shellcheck disable=SC2329
+    curl() {
+        return 7
+    }
+    # shellcheck disable=SC2329
+    journalctl() {
+        return 0
+    }
+
+    started="${SECONDS}"
+    if (wait_until_ready) >/dev/null 2>&1; then
+        fail "an unreachable Web UI must not become ready"
+    fi
+    elapsed=$((SECONDS - started))
+    ((elapsed >= 1 && elapsed <= 3)) ||
+        fail "one-second readiness timeout took ${elapsed}s"
 }
 
 test_ca_uses_private_nss_database() {
@@ -504,6 +587,9 @@ run_test "reject invalid mitmproxy YAML" test_invalid_mitmproxy_yaml_is_rejected
 run_test "strict proxy verification" test_verify_failure_is_nonzero
 run_test "installation consistency state" test_installation_consistency_state
 run_test "repeatable setup and transaction rollback" test_setup_transaction_rolls_back
+run_test "authenticated Web UI readiness" test_ready_accepts_authenticated_web_ui
+run_test "failed service readiness" test_ready_stops_on_failed_service
+run_test "wall-clock readiness timeout" test_ready_timeout_uses_wall_clock
 run_test "private Chromium NSS database" test_ca_uses_private_nss_database
 run_test "repeatable managed uninstall" test_uninstall_removes_only_managed_legacy_unit
 

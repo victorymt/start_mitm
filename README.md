@@ -72,6 +72,49 @@ Web UI: http://127.0.0.1:8082/
 Proxy:  http://127.0.0.1:8080
 ```
 
+## 与 Pikachu 靶场配合使用
+
+本项目可以配合 Docker 运行的 Pikachu Web 安全靶场使用。推荐只把靶场端口绑定到
+本机，避免将存在已知漏洞的应用暴露到局域网：
+
+```bash
+docker run -d --name pikachu -p 127.0.0.1:8081:80 area39/pikachu
+```
+
+你原来的 `docker run -d -p 8081:80 area39/pikachu` 也可以工作，但 Docker 会默认在
+所有主机接口上开放 `8081` 端口。
+
+首次安装时，可以直接把隔离 Chromium 的启动地址设为 Pikachu：
+
+```bash
+CHROMIUM_MITM_URL=http://127.0.0.1:8081/ \
+./setup_mitmweb.sh setup
+```
+
+如果 mitmweb 已经安装并运行，无需重新配置，直接打开靶场即可：
+
+```bash
+./setup_mitmweb.sh browser http://127.0.0.1:8081/
+```
+
+此时端口用途如下：
+
+| 端口 | 用途 |
+| --- | --- |
+| `8080` | Chromium 使用的 mitmweb 抓包代理 |
+| `8081` | Docker 映射到宿主机的 Pikachu Web 服务 |
+| `8082` | mitmweb Web UI |
+
+在隔离 Chromium 中操作 `http://127.0.0.1:8081/`，然后通过脚本安装完成时输出的
+带 token Web UI 地址查看请求；也可以运行 `./setup_mitmweb.sh status` 再次查看该地址。
+
+不再使用靶场时停止并删除容器：
+
+```bash
+docker stop pikachu
+docker rm pikachu
+```
+
 ## 非交互安装
 
 `setup` 不会询问任何问题，适合脚本和自动化环境：

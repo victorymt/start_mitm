@@ -785,18 +785,26 @@ show_configuration_summary() {
 }
 
 wait_until_ready() {
-    local attempt
-    local attempts=$((10#${READY_TIMEOUT} * 10))
+    local deadline=$((SECONDS + 10#${READY_TIMEOUT}))
+    local http_code
     local target
 
     target="$(web_url)"
-    for ((attempt = 0; attempt < attempts; attempt++)); do
+    log "Waiting for mitmweb Web UI at ${target} (timeout: ${READY_TIMEOUT}s)."
+    while ((SECONDS < deadline)); do
         if systemctl --user is-failed --quiet "${SERVICE_NAME}"; then
             break
         fi
-        if curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 \
-            -o /dev/null "${target}" 2>/dev/null; then
-            return 0
+        if http_code="$(curl --noproxy '*' -sS --connect-timeout 1 --max-time 1 \
+            -o /dev/null -w '%{http_code}' "${target}" 2>/dev/null)"; then
+            case "${http_code}" in
+                2?? | 3?? | 401 | 403)
+                    if systemctl --user is-active --quiet "${SERVICE_NAME}"; then
+                        log "mitmweb Web UI is ready at ${target}."
+                        return 0
+                    fi
+                    ;;
+            esac
         fi
         sleep 0.1
     done
